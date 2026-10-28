@@ -1,11 +1,11 @@
 {
-    "name": "doa_sangue",
-    "short_name": "doa_sangue",
+    "name": "DoaVida",
+    "short_name": "DoaVida",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FBF7F6",
+    "theme_color": "#C62828",
+    "description": "Conecta doadores de sangue a hemocentros e hospitais do Alto Vale do Itajaí.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -36,6 +36,16 @@ Na tela de login há botões que preenchem essas contas. No painel da instituiç
 
 ---
 
+## Versão online (GitHub Pages)
+
+Demo no navegador: **https://miguelsync.github.io/DoaVida/**
+
+A cada `push` na branch `main`, o workflow `.github/workflows/deploy-pages.yml` compila o Flutter web e publica o site automaticamente (requer *Settings → Pages → Source: GitHub Actions*).
+
+Contas de demonstração, roteiros de teste e resultados esperados: **[GUIA_DE_TESTE.md](GUIA_DE_TESTE.md)**.
+
+---
+
 ## Requisitos × implementação
 
 | Requisito | Onde está | Como foi atendido |
