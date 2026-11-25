@@ -1,11 +1,13 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
+import 'firebase_options.dart';
+import 'services/firebase_service.dart';
 import 'services/notification_service.dart';
-import 'services/storage_service.dart';
 import 'state/app_state.dart';
 
 Future<void> main() async {
@@ -14,14 +16,15 @@ Future<void> main() async {
   await initializeDateFormatting('pt_BR');
   Intl.defaultLocale = 'pt_BR';
 
-  final storage = StorageService();
-  await storage.init();
+  // Backend em nuvem: Firebase Authentication + Cloud Firestore.
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   final notificacoes = NotificationService();
   await notificacoes.init();
 
-  final estado = AppState(storage, notificacoes);
-  await estado.carregar();
+  final estado = AppState(FirebaseService(), notificacoes);
+  // Restaura a sessão em segundo plano; enquanto isso o app mostra a abertura.
+  estado.carregar();
 
   runApp(
     ChangeNotifierProvider<AppState>.value(
