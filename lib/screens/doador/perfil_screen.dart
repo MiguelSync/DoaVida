@@ -61,7 +61,8 @@ class PerfilScreen extends StatelessWidget {
       perigoso: true,
     );
     if (!ok || !context.mounted) return;
-    await context.read<AppState>().excluirContaDoador();
+    final erro = await context.read<AppState>().excluirContaDoador();
+    if (erro != null && context.mounted) avisar(context, erro);
   }
 
   @override
@@ -149,7 +150,7 @@ class PerfilScreen extends StatelessWidget {
             title: const Text('Alertas de campanhas e estoque crítico'),
             subtitle: Text(estado.pushDisponivel
                 ? 'Você será avisado quando o tipo ${d.tipo.label} for necessário.'
-                : 'Neste dispositivo os alertas aparecem na central de notificações do app.'),
+                : 'No navegador, os alertas chegam em tempo real na central de notificações do app.'),
           ),
         ),
         const TituloSecao('Privacidade e ajuda',
