@@ -28,16 +28,6 @@ class _InstituicaoShellState extends State<InstituicaoShell> {
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const FaqScreen()),
         );
-      case 'demo':
-        final ok = await confirmar(
-          context,
-          titulo: 'Restaurar demonstração?',
-          mensagem: 'Todos os dados (doadores, agendamentos, alertas e '
-              'estoques) voltarão ao estado inicial e você sairá da conta.',
-          botao: 'Restaurar',
-          perigoso: true,
-        );
-        if (ok) await estado.restaurarDemonstracao();
       case 'sair':
         await estado.sair();
     }
@@ -75,13 +65,6 @@ class _InstituicaoShellState extends State<InstituicaoShell> {
               child: ListTile(
                 leading: Icon(Icons.help_outline),
                 title: Text('FAQ de doação'),
-              ),
-            ),
-            PopupMenuItem(
-              value: 'demo',
-              child: ListTile(
-                leading: Icon(Icons.restart_alt),
-                title: Text('Restaurar demonstração'),
               ),
             ),
             PopupMenuItem(
