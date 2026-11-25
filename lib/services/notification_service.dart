@@ -3,10 +3,10 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// Notificações do sistema (RF07).
 ///
-/// No protótipo, quando o hospital publica um alerta, a notificação é
-/// disparada localmente no aparelho (simulando o push). Para push real entre
-/// aparelhos diferentes, basta trocar a implementação de [mostrar] por
-/// Firebase Cloud Messaging — o resto do app não muda.
+/// Quando um hospital publica um alerta, o Firestore entrega a notificação em
+/// tempo real ao app do doador (em qualquer aparelho) e este serviço a exibe
+/// como notificação do sistema. Para avisar com o app fechado, o próximo passo
+/// é o Firebase Cloud Messaging — o resto do app não muda.
 class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
