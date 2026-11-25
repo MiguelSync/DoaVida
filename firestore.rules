@@ -1,0 +1,103 @@
+rules_version = '2';
+
+// Regras de segurança do Cloud Firestore — DoaVida (RNF02 e RNF03/LGPD).
+// Princípio: cada pessoa só lê e altera o que é dela; instituições veem o
+// necessário para atender os doadores; ninguém lê dados de outro doador.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    // Conta usada só pelo script de carga de dados de demonstração (tool/seed).
+    function admin() {
+      return logado() && request.auth.token.email == 'admin@doavida.app';
+    }
+
+    function eu(uid) {
+      return logado() && request.auth.uid == uid;
+    }
+
+    // Hospitais e hemocentros têm documento em /instituicoes com o próprio uid.
+    function instituicao() {
+      return logado() &&
+        exists(/databases/$(database)/documents/instituicoes/$(request.auth.uid));
+    }
+
+    function mudou() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // Hemocentros e hospitais: dados públicos (mapa e lista de locais).
+    match /instituicoes/{id} {
+      allow read: if true;
+      // A instituição só altera o próprio estoque.
+      allow update: if admin() || (eu(id) && mudou().hasOnly(['estoque']));
+      allow create, delete: if admin();
+    }
+
+    // Doadores: só o próprio doador e as instituições leem.
+    match /doadores/{id} {
+      allow read: if admin() || eu(id) || instituicao();
+      allow create: if admin() ||
+        (eu(id) && request.resource.data.termosAceitosEm is string);
+      // Dados de identificação não podem ser trocados depois do cadastro.
+      allow update: if admin() || (eu(id) &&
+        !mudou().hasAny(['email', 'tipo', 'sexo', 'dataNascimento', 'termosAceitosEm']));
+      allow delete: if admin() || eu(id);
+    }
+
+    // Histórico de doações.
+    match /doacoes/{id} {
+      allow read: if admin() || instituicao() ||
+        (logado() && resource.data.doadorId == request.auth.uid);
+      allow create: if admin() ||
+        (logado() && request.resource.data.doadorId == request.auth.uid &&
+          request.resource.data.informadaPeloDoador == true) ||
+        (instituicao() && request.resource.data.instituicaoId == request.auth.uid);
+      allow update: if admin();
+      allow delete: if admin() ||
+        (logado() && resource.data.doadorId == request.auth.uid);
+    }
+
+    // Agendamentos: qualquer usuário logado lê (para calcular vagas por
+    // horário). O documento não tem dados pessoais, só ids e horário.
+    match /agendamentos/{id} {
+      allow read: if logado();
+      allow create: if admin() ||
+        (logado() && request.resource.data.doadorId == request.auth.uid &&
+          request.resource.data.status == 'agendado');
+      allow update: if admin() ||
+        (logado() && resource.data.doadorId == request.auth.uid &&
+          request.resource.data.status == 'cancelado' && mudou().hasOnly(['status'])) ||
+        (instituicao() && resource.data.instituicaoId == request.auth.uid &&
+          mudou().hasOnly(['status']));
+      allow delete: if admin() ||
+        (logado() && resource.data.doadorId == request.auth.uid);
+    }
+
+    // Alertas e campanhas publicados pelas instituições.
+    match /alertas/{id} {
+      allow read: if logado();
+      allow create: if admin() ||
+        (instituicao() && request.resource.data.instituicaoId == request.auth.uid);
+      allow update: if admin() ||
+        (instituicao() && resource.data.instituicaoId == request.auth.uid &&
+          mudou().hasOnly(['ativo']));
+      allow delete: if admin();
+    }
+
+    // Caixa de entrada de cada doador.
+    match /notificacoes/{id} {
+      allow read: if admin() ||
+        (logado() && resource.data.doadorId == request.auth.uid);
+      allow create: if admin() || instituicao();
+      allow update: if admin() ||
+        (logado() && resource.data.doadorId == request.auth.uid &&
+          mudou().hasOnly(['lida']));
+      allow delete: if admin() ||
+        (logado() && resource.data.doadorId == request.auth.uid);
+    }
+  }
+}

@@ -1,7 +1,7 @@
 name: doa_sangue
 description: "DoaVida — App de conexão entre doadores de sangue e hemocentros/hospitais do Alto Vale do Itajaí. Projeto de Extensão UNIDAVI."
 publish_to: 'none'
-version: 0.1.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
@@ -16,9 +16,10 @@ dependencies:
   # Estado
   provider: ^6.1.2
 
-  # Persistência local + segurança (RNF02)
-  shared_preferences: ^2.3.0
-  crypto: ^3.0.3
+  # Backend em nuvem (Firebase): login e banco de dados em tempo real
+  firebase_core: ">=4.0.0"
+  firebase_auth: ">=6.0.0"
+  cloud_firestore: ">=6.0.0"
 
   # Datas em pt-BR (versão definida pelo flutter_localizations)
   intl: any

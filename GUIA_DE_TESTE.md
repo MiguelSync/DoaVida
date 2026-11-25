@@ -11,7 +11,7 @@ Como abrir o app, quais contas usar e o que esperar em cada fluxo.
 | **Local, no celular/emulador** | `flutter run` |
 | **Testes automatizados** | `flutter test` |
 
-> Os dados de demonstração ficam salvos **no próprio navegador** (ou aparelho). Cada pessoa que abre o app enxerga os seus dados, e nada sincroniza entre aparelhos. Para voltar ao estado inicial: entre como instituição → menu **⋮** → **Restaurar demonstração**.
+> Os dados ficam no **Firebase** (Authentication + Cloud Firestore, projeto `doavida-b5ef1`). Todo mundo que abre o app vê os mesmos dados, e o que um faz aparece **na hora** para os outros (ex.: o hospital confirma e o doador vê o status mudar sem recarregar). Para voltar ao estado inicial, rode o script `tool/seed` (ver README).
 
 ## Contas de demonstração
 
@@ -31,6 +31,7 @@ Na tela de login há botões que preenchem a conta (só para as duas primeiras d
 | `carla@demo.com` | Carla · AB+ | Agendamento aguardando confirmação no Hospital Regional |
 | `diego@demo.com` | Diego · O- | Agendamento aguardando confirmação no Hemosc |
 | `felipe@demo.com` · `gabriela@demo.com` · `henrique@demo.com` | O+ · B+ · A+ | Aptos |
+| `isabela@demo.com` · `joao@demo.com` · `karina@demo.com` · `leonardo@demo.com` · `marcos@demo.com` · `natalia@demo.com` | O+ · A+ · O- · B+ · AB- · A- | Outros doadores da base (Leonardo não recebe alertas) |
 
 ### Hospitais e hemocentros
 
@@ -112,9 +113,10 @@ Disponível sem login (tela de boas-vindas → "Quem pode doar?") e dentro do ap
 
 ## Sobre notificações
 
-- **No celular (Android/iOS):** o alerta aparece como notificação do sistema, no mesmo aparelho onde o hospital publicou (simulação do push) e também na central do app.
-- **Na web (GitHub Pages):** só a central de notificações (sino). A notificação do sistema não é usada no navegador.
-- Push real entre aparelhos diferentes exigiria servidor (Firebase). Está listado como próximo passo no README.
+- **Em tempo real, entre aparelhos:** quando o hospital publica um alerta, cada doador compatível recebe um documento em `notificacoes` no Firestore. Se o doador estiver com o app aberto (em outro celular ou outra janela), aparece um aviso vermelho na hora e o contador do sino sobe.
+- **Teste em duas janelas:** abra o app numa janela anônima como `doador@demo.com` e, em outra janela, entre como `hemosc@demo.com` → Alertas → Novo alerta de O-. O aviso chega na janela do doador em 1–2 segundos.
+- **No celular (Android/iOS):** além do aviso, aparece a notificação do sistema.
+- **Com o app fechado:** exigiria Firebase Cloud Messaging + Cloud Functions (plano pago). Está como próximo passo no README.
 
 ## Prints sugeridos para a Entrega 1
 
