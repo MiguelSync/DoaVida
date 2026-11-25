@@ -28,8 +28,6 @@ class Instituicao {
     required this.lat,
     required this.lng,
     required this.email,
-    required this.senhaHash,
-    required this.salt,
     required this.estoque,
   });
 
@@ -41,8 +39,6 @@ class Instituicao {
   final double lat;
   final double lng;
   final String email;
-  final String senhaHash;
-  final String salt;
 
   /// Nível de estoque por tipo sanguíneo (alimenta os alertas — RF06).
   final Map<TipoSanguineo, NivelEstoque> estoque;
@@ -63,8 +59,6 @@ class Instituicao {
         'lat': lat,
         'lng': lng,
         'email': email,
-        'senhaHash': senhaHash,
-        'salt': salt,
         'estoque': {
           for (final e in estoque.entries) e.key.name: e.value.name,
         },
@@ -81,8 +75,6 @@ class Instituicao {
       lat: (j['lat'] as num).toDouble(),
       lng: (j['lng'] as num).toDouble(),
       email: j['email'] as String,
-      senhaHash: j['senhaHash'] as String,
-      salt: j['salt'] as String,
       estoque: {
         for (final e in bruto.entries)
           TipoSanguineo.values.byName(e.key):

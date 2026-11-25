@@ -14,8 +14,6 @@ class Doador {
     required this.id,
     required this.nome,
     required this.email,
-    required this.senhaHash,
-    required this.salt,
     required this.dataNascimento,
     required this.sexo,
     required this.tipo,
@@ -32,8 +30,6 @@ class Doador {
   final String id;
   String nome;
   final String email;
-  final String senhaHash;
-  final String salt;
   final DateTime dataNascimento;
   final Sexo sexo;
   final TipoSanguineo tipo;
@@ -64,8 +60,6 @@ class Doador {
         'id': id,
         'nome': nome,
         'email': email,
-        'senhaHash': senhaHash,
-        'salt': salt,
         'dataNascimento': dataNascimento.toIso8601String(),
         'sexo': sexo.name,
         'tipo': tipo.name,
@@ -83,8 +77,6 @@ class Doador {
         id: j['id'] as String,
         nome: j['nome'] as String,
         email: j['email'] as String,
-        senhaHash: j['senhaHash'] as String,
-        salt: j['salt'] as String,
         dataNascimento: DateTime.parse(j['dataNascimento'] as String),
         sexo: Sexo.values.byName(j['sexo'] as String),
         tipo: TipoSanguineo.values.byName(j['tipo'] as String),
@@ -98,7 +90,7 @@ class Doador {
         criadoEm: DateTime.tryParse(j['criadoEm'] as String? ?? ''),
       );
 
-  /// Dados pessoais legíveis, sem credenciais — usado na exportação (LGPD art. 18).
+  /// Dados pessoais legíveis (a senha fica só no Firebase Auth) — usado na exportação (LGPD art. 18).
   Map<String, dynamic> dadosPessoais() => {
         'nome': nome,
         'email': email,
