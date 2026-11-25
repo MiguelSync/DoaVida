@@ -36,6 +36,7 @@ class _CadastroDoadorScreenState extends State<CadastroDoadorScreen> {
   bool _aceite = false;
   bool _notificacoes = true;
   bool _tentouEnviar = false;
+  bool _enviando = false;
   bool _ocultarSenha = true;
 
   @override
@@ -73,7 +74,8 @@ class _CadastroDoadorScreenState extends State<CadastroDoadorScreen> {
     });
   }
 
-  void _enviar() {
+  Future<void> _enviar() async {
+    if (_enviando) return;
     setState(() => _tentouEnviar = true);
     final formOk = _form.currentState!.validate();
     if (!formOk || _sexo == null || _tipo == null) {
@@ -84,7 +86,8 @@ class _CadastroDoadorScreenState extends State<CadastroDoadorScreen> {
       avisar(context, 'Para continuar, aceite os Termos de Uso e a Política de Privacidade.');
       return;
     }
-    final erro = context.read<AppState>().cadastrarDoador(
+    setState(() => _enviando = true);
+    final erro = await context.read<AppState>().cadastrarDoador(
           nome: _nome.text,
           email: _email.text,
           senha: _senha.text,
@@ -98,6 +101,8 @@ class _CadastroDoadorScreenState extends State<CadastroDoadorScreen> {
           aceitouTermos: _aceite,
           notificacoes: _notificacoes,
         );
+    if (!mounted) return;
+    setState(() => _enviando = false);
     if (erro != null) {
       avisar(context, erro);
       return;
@@ -318,7 +323,7 @@ class _CadastroDoadorScreenState extends State<CadastroDoadorScreen> {
               ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _aceite ? _enviar : null,
+                onPressed: _aceite && !_enviando ? _enviar : null,
                 style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(52)),
                 child: const Text('Criar minha conta'),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../services/seed_data.dart';
 import '../state/app_state.dart';
 import '../theme/tema.dart';
 import '../widgets/comuns.dart';
@@ -21,6 +20,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final _senha = TextEditingController();
   bool _ocultarSenha = true;
   String? _erro;
+  bool _enviando = false;
+
+  /// Senha das contas de demonstração criadas no Firebase (tool/seed).
+  static const _senhaDemo = '123456';
 
   bool get _doador => widget.papel == Papel.doador;
 
@@ -31,12 +34,21 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _entrar() {
-    if (!_form.currentState!.validate()) return;
-    final erro =
-        context.read<AppState>().entrar(widget.papel, _email.text, _senha.text);
+  Future<void> _entrar() async {
+    if (_enviando || !_form.currentState!.validate()) return;
+    setState(() {
+      _enviando = true;
+      _erro = null;
+    });
+    final erro = await context
+        .read<AppState>()
+        .entrar(widget.papel, _email.text, _senha.text);
+    if (!mounted) return;
     if (erro != null) {
-      setState(() => _erro = erro);
+      setState(() {
+        _erro = erro;
+        _enviando = false;
+      });
       return;
     }
     Navigator.of(context).popUntil((rota) => rota.isFirst);
@@ -127,10 +139,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                     const SizedBox(height: 20),
                     FilledButton(
-                      onPressed: _entrar,
+                      onPressed: _enviando ? null : _entrar,
                       style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(52)),
-                      child: const Text('Entrar'),
+                      child: _enviando
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2.5, color: Colors.white),
+                            )
+                          : const Text('Entrar'),
                     ),
                     if (_doador) ...[
                       const SizedBox(height: 12),
@@ -153,7 +172,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           const Text('Contas de demonstração',
                               style: TextStyle(fontWeight: FontWeight.w800)),
                           const Text(
-                            'Senha: ${SeedData.senhaDemo} · toque para preencher',
+                            'Senha: $_senhaDemo · toque para preencher',
                             style: TextStyle(
                                 fontSize: 12, color: AppCores.textoSuave),
                           ),
@@ -169,7 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   label: Text(rotulo),
                                   onPressed: () => setState(() {
                                     _email.text = email;
-                                    _senha.text = SeedData.senhaDemo;
+                                    _senha.text = _senhaDemo;
                                     _erro = null;
                                   }),
                                 ),

@@ -20,8 +20,8 @@ class TermosScreen extends StatelessWidget {
     ),
     (
       '2. Dados coletados',
-      'Coletamos: nome, e-mail, senha (armazenada apenas de forma criptografada '
-          'por hash), data de nascimento, sexo biológico, tipo sanguíneo, peso, '
+      'Coletamos: nome, e-mail, senha (guardada apenas pelo Firebase '
+          'Authentication, nunca no banco de dados), data de nascimento, sexo biológico, tipo sanguíneo, peso, '
           'telefone, cidade e endereço, além do histórico de doações e '
           'agendamentos. A localização do aparelho é usada somente no momento em '
           'que você abre o mapa e não é armazenada.'
@@ -42,8 +42,8 @@ class TermosScreen extends StatelessWidget {
     ),
     (
       '5. Compartilhamento',
-      'Os hemocentros e hospitais não têm acesso à sua lista completa de dados. '
-          'Ao agendar uma doação, a instituição escolhida visualiza apenas seu '
+      'Os dados ficam no Google Firebase (servidores em São Paulo). '
+          'Ao agendar uma doação, a instituição escolhida visualiza no app apenas seu '
           'nome reduzido, tipo sanguíneo, telefone e o horário marcado. Os '
           'alertas são enviados com base no tipo sanguíneo, sem expor a sua '
           'identidade à instituição. Não vendemos nem compartilhamos dados com '
@@ -51,8 +51,10 @@ class TermosScreen extends StatelessWidget {
     ),
     (
       '6. Segurança',
-      'As senhas são protegidas com hash criptográfico (SHA-256 com salt). '
-          'O acesso às áreas do doador e da instituição é separado por perfil.'
+      'O login usa o Firebase Authentication, que guarda as senhas com hash '
+          'criptográfico. Regras de segurança no banco garantem que cada doador '
+          'só acesse os próprios dados e que só instituições cadastradas vejam '
+          'os agendamentos. A conexão é sempre criptografada (HTTPS).'
     ),
     (
       '7. Seus direitos (art. 18 da LGPD)',
