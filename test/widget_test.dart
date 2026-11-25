@@ -16,8 +16,6 @@ Doador _doador({
       id: 'x',
       nome: 'Pessoa Teste',
       email: 't@t.com',
-      senhaHash: '',
-      salt: '',
       dataNascimento: nascimento ?? DateTime(1995, 1, 1),
       sexo: sexo,
       tipo: TipoSanguineo.oPos,
