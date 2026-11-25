@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -10,10 +11,8 @@ import '../models/instituicao.dart';
 import '../models/notificacao.dart';
 import '../models/tipo_sanguineo.dart';
 import '../services/elegibilidade.dart';
+import '../services/firebase_service.dart';
 import '../services/notification_service.dart';
-import '../services/seed_data.dart';
-import '../services/seguranca.dart';
-import '../services/storage_service.dart';
 import '../utils/formatos.dart';
 
 enum Papel { doador, instituicao }
@@ -21,9 +20,9 @@ enum Papel { doador, instituicao }
 /// Estado global do app (padrão Provider + ChangeNotifier).
 /// Concentra as regras de negócio; as telas apenas leem e chamam métodos.
 class AppState extends ChangeNotifier {
-  AppState(this._storage, this._push);
+  AppState(this._fb, this._push);
 
-  final StorageService _storage;
+  final FirebaseService _fb;
   final NotificationService _push;
 
   /// Capacidade de atendimento por horário em cada instituição.
@@ -38,141 +37,189 @@ class AppState extends ChangeNotifier {
 
   Papel? _papel;
   String? _usuarioId;
+  bool _carregando = true;
+
+  final _mensagens = StreamController<String>.broadcast();
+  final _novas = StreamController<Notificacao>.broadcast();
 
   Papel? get papel => _papel;
   String? get usuarioId => _usuarioId;
+  bool get carregando => _carregando;
   bool get pushDisponivel => _push.disponivel;
+
+  /// Avisos para a interface (ex.: falha ao gravar no Firestore).
+  Stream<String> get mensagens => _mensagens.stream;
+
+  /// Notificações que chegaram em tempo real enquanto o app está aberto.
+  Stream<Notificacao> get novasNotificacoes => _novas.stream;
 
   List<Instituicao> get instituicoes => List.unmodifiable(_instituicoes);
   int get totalDoadores => _doadores.length;
 
   // ---------------------------------------------------------------------------
-  // Carregamento e persistência
+  // Carregamento: sessão do Firebase Auth + escutas em tempo real do Firestore
   // ---------------------------------------------------------------------------
 
   Future<void> carregar() async {
-    final banco = _storage.lerBanco();
-    var carregou = false;
-    if (banco != null) {
-      try {
-        _deJson(banco);
-        carregou = true;
-      } catch (e) {
-        debugPrint('Banco local inválido, recriando dados de demonstração: $e');
+    try {
+      final usuario = await _fb.usuarioInicial();
+      if (usuario != null) {
+        final erro = await _abrirSessao(usuario.uid);
+        if (erro != null) await _fb.sair();
       }
+    } catch (e) {
+      debugPrint('Falha ao restaurar a sessão: $e');
     }
-    if (!carregou) {
-      _aplicar(SeedData.gerar());
-      await _storage.salvarBanco(_paraJson());
-    }
-
-    final sessao = _storage.lerSessao();
-    if (sessao != null) {
-      final (papelSalvo, id) = sessao;
-      if (papelSalvo == Papel.doador.name && doadorPorId(id) != null) {
-        _papel = Papel.doador;
-        _usuarioId = id;
-      } else if (papelSalvo == Papel.instituicao.name &&
-          instituicaoPorId(id) != null) {
-        _papel = Papel.instituicao;
-        _usuarioId = id;
-      }
-    }
+    _carregando = false;
     notifyListeners();
   }
 
-  void _aplicar(DadosIniciais d) {
-    _doadores = d.doadores;
-    _instituicoes = d.instituicoes;
-    _doacoes = d.doacoes;
-    _agendamentos = d.agendamentos;
-    _alertas = d.alertas;
-    _notificacoes = d.notificacoes;
-  }
-
-  Map<String, dynamic> _paraJson() => {
-        'doadores': _doadores.map((e) => e.toJson()).toList(),
-        'instituicoes': _instituicoes.map((e) => e.toJson()).toList(),
-        'doacoes': _doacoes.map((e) => e.toJson()).toList(),
-        'agendamentos': _agendamentos.map((e) => e.toJson()).toList(),
-        'alertas': _alertas.map((e) => e.toJson()).toList(),
-        'notificacoes': _notificacoes.map((e) => e.toJson()).toList(),
-      };
-
-  List<Map<String, dynamic>> _lista(Map<String, dynamic> banco, String chave) =>
-      (banco[chave] as List? ?? [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-
-  void _deJson(Map<String, dynamic> b) {
-    _doadores = _lista(b, 'doadores').map(Doador.fromJson).toList();
-    _instituicoes = _lista(b, 'instituicoes').map(Instituicao.fromJson).toList();
-    _doacoes = _lista(b, 'doacoes').map(Doacao.fromJson).toList();
-    _agendamentos = _lista(b, 'agendamentos').map(Agendamento.fromJson).toList();
-    _alertas = _lista(b, 'alertas').map(Alerta.fromJson).toList();
-    _notificacoes = _lista(b, 'notificacoes').map(Notificacao.fromJson).toList();
-    if (_instituicoes.isEmpty) throw const FormatException('sem instituições');
-  }
-
-  void _salvar() {
-    _storage.salvarBanco(_paraJson());
-    notifyListeners();
-  }
-
-  /// Volta todos os dados para o estado inicial de demonstração.
-  Future<void> restaurarDemonstracao() async {
-    _aplicar(SeedData.gerar());
-    _papel = null;
-    _usuarioId = null;
-    await _storage.limparSessao();
-    _salvar();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Autenticação
-  // ---------------------------------------------------------------------------
-
-  String? entrar(Papel papel, String email, String senha) {
-    final e = email.trim().toLowerCase();
-    if (papel == Papel.doador) {
-      final d = primeiro(_doadores, (x) => x.email == e);
-      if (d == null || !Seguranca.conferir(senha, d.salt, d.senhaHash)) {
-        return 'E-mail ou senha inválidos.';
-      }
-      _iniciarSessao(papel, d.id);
+  /// Descobre o perfil do usuário logado, carrega os dados dele e liga as
+  /// escutas em tempo real. Retorna uma mensagem de erro ou null.
+  Future<String?> _abrirSessao(String uid, {Papel? esperado}) async {
+    final inst = await _fb.documento(Colecoes.instituicoes, uid);
+    final Papel papel;
+    if (inst != null) {
+      papel = Papel.instituicao;
+      _instituicoes = [Instituicao.fromJson(inst)];
     } else {
-      final i = primeiro(_instituicoes, (x) => x.email == e);
-      if (i == null || !Seguranca.conferir(senha, i.salt, i.senhaHash)) {
-        return 'E-mail ou senha inválidos.';
-      }
-      _iniciarSessao(papel, i.id);
+      final doc = await _fb.documento(Colecoes.doadores, uid);
+      if (doc == null) return 'Cadastro não encontrado para esta conta.';
+      papel = Papel.doador;
+      _doadores = [Doador.fromJson(doc)];
     }
+    if (esperado != null && esperado != papel) {
+      _limparDados();
+      return papel == Papel.doador
+          ? 'Esta conta é de doador. Use "Sou doador" para entrar.'
+          : 'Esta conta é de uma instituição. Use o acesso institucional.';
+    }
+    await _ligarEscutas(papel, uid);
+    _papel = papel;
+    _usuarioId = uid;
+    if (papel == Papel.doador) _push.pedirPermissao();
+    notifyListeners();
     return null;
   }
 
-  void _iniciarSessao(Papel papel, String id) {
-    _papel = papel;
-    _usuarioId = id;
-    _storage.salvarSessao(papel.name, id);
-    if (papel == Papel.doador) _push.pedirPermissao();
-    notifyListeners();
+  Future<void> _ligarEscutas(Papel papel, String uid) async {
+    await _fb.pararEscutas();
+    final pendentes = <Completer<void>>[];
+
+    void escutar(
+      String colecao,
+      void Function(LoteFirestore) aplicar, {
+      String? campo,
+      Object? igualA,
+      String? documento,
+    }) {
+      final pronto = Completer<void>();
+      pendentes.add(pronto);
+      void aoMudar(LoteFirestore lote) {
+        try {
+          aplicar(lote);
+        } catch (e) {
+          debugPrint('Dado inválido em $colecao: $e');
+        }
+        if (!pronto.isCompleted) pronto.complete();
+        notifyListeners();
+      }
+
+      void aoErrar(Object e) {
+        if (!pronto.isCompleted) pronto.complete();
+      }
+
+      if (documento != null) {
+        _fb.escutarDocumento(colecao, documento, aoMudar, aoErrar: aoErrar);
+      } else {
+        _fb.escutar(colecao, aoMudar,
+            campo: campo, igualA: igualA, aoErrar: aoErrar);
+      }
+    }
+
+    List<T> converter<T>(
+            LoteFirestore l, T Function(Map<String, dynamic>) fromJson) =>
+        l.documentos.map(fromJson).toList();
+
+    escutar(Colecoes.instituicoes,
+        (l) => _instituicoes = converter(l, Instituicao.fromJson));
+    escutar(Colecoes.agendamentos,
+        (l) => _agendamentos = converter(l, Agendamento.fromJson));
+    escutar(Colecoes.alertas, (l) => _alertas = converter(l, Alerta.fromJson));
+
+    if (papel == Papel.doador) {
+      escutar(Colecoes.doadores, documento: uid, (l) {
+        _doadores = converter(l, Doador.fromJson);
+        // Conta apagada em outro aparelho: encerra a sessão.
+        if (_doadores.isEmpty && !l.inicial) sair();
+      });
+      escutar(Colecoes.doacoes, campo: 'doadorId', igualA: uid,
+          (l) => _doacoes = converter(l, Doacao.fromJson));
+      escutar(Colecoes.notificacoes, campo: 'doadorId', igualA: uid, (l) {
+        _notificacoes = converter(l, Notificacao.fromJson);
+        if (l.inicial) return;
+        // Chegou um alerta novo publicado por uma instituição (RF07).
+        for (final n in l.adicionados.map(Notificacao.fromJson)) {
+          _novas.add(n);
+          _push.mostrar(n.titulo, n.corpo);
+        }
+      });
+    } else {
+      escutar(Colecoes.doadores,
+          (l) => _doadores = converter(l, Doador.fromJson));
+      escutar(Colecoes.doacoes,
+          (l) => _doacoes = converter(l, Doacao.fromJson));
+      _notificacoes = [];
+    }
+
+    // RNF05: não deixa o usuário esperando mais que 10 s.
+    await Future.wait(pendentes.map((c) => c.future))
+        .timeout(const Duration(seconds: 10), onTimeout: () => []);
+  }
+
+  void _limparDados() {
+    _doadores = [];
+    _instituicoes = [];
+    _doacoes = [];
+    _agendamentos = [];
+    _alertas = [];
+    _notificacoes = [];
+  }
+
+  /// Grava no Firestore sem travar a tela; se falhar, avisa a interface.
+  void _gravar(Future<void> operacao) {
+    operacao.catchError((Object e) {
+      _mensagens.add(FirebaseService.mensagemErro(e));
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Autenticação (Firebase Authentication)
+  // ---------------------------------------------------------------------------
+
+  Future<String?> entrar(Papel papel, String email, String senha) async {
+    try {
+      final uid = await _fb.entrar(email, senha);
+      final erro = await _abrirSessao(uid, esperado: papel);
+      if (erro != null) await _fb.sair();
+      return erro;
+    } catch (e) {
+      return FirebaseService.mensagemErro(e);
+    }
   }
 
   Future<void> sair() async {
+    await _fb.pararEscutas();
     _papel = null;
     _usuarioId = null;
-    await _storage.limparSessao();
+    _limparDados();
     notifyListeners();
-  }
-
-  bool emailEmUso(String email) {
-    final e = email.trim().toLowerCase();
-    return _doadores.any((d) => d.email == e) ||
-        _instituicoes.any((i) => i.email == e);
+    await _fb.sair();
   }
 
   /// RF01 + RNF03: cadastro do doador com aceite explícito dos termos.
-  String? cadastrarDoador({
+  /// A senha fica no Firebase Authentication (nunca no banco de dados).
+  Future<String?> cadastrarDoador({
     required String nome,
     required String email,
     required String senha,
@@ -185,32 +232,31 @@ class AppState extends ChangeNotifier {
     required String endereco,
     required bool aceitouTermos,
     required bool notificacoes,
-  }) {
+  }) async {
     if (!aceitouTermos) {
       return 'É necessário aceitar os Termos de Uso e a Política de Privacidade.';
     }
-    if (emailEmUso(email)) return 'Este e-mail já está cadastrado.';
-    final salt = Seguranca.gerarSalt();
-    final doador = Doador(
-      id: gerarId(),
-      nome: nome.trim(),
-      email: email.trim().toLowerCase(),
-      salt: salt,
-      senhaHash: Seguranca.hashSenha(senha, salt),
-      dataNascimento: nascimento,
-      sexo: sexo,
-      tipo: tipo,
-      peso: peso,
-      telefone: telefone.trim(),
-      cidade: cidade.trim(),
-      endereco: endereco.trim(),
-      notificacoes: notificacoes,
-      termosAceitosEm: DateTime.now(),
-    );
-    _doadores.add(doador);
-    _storage.salvarBanco(_paraJson());
-    _iniciarSessao(Papel.doador, doador.id);
-    return null;
+    try {
+      final uid = await _fb.criarConta(email, senha);
+      final doador = Doador(
+        id: uid,
+        nome: nome.trim(),
+        email: email.trim().toLowerCase(),
+        dataNascimento: nascimento,
+        sexo: sexo,
+        tipo: tipo,
+        peso: peso,
+        telefone: telefone.trim(),
+        cidade: cidade.trim(),
+        endereco: endereco.trim(),
+        notificacoes: notificacoes,
+        termosAceitosEm: DateTime.now(),
+      );
+      await _fb.salvar(Colecoes.doadores, uid, doador.toJson());
+      return await _abrirSessao(uid, esperado: Papel.doador);
+    } catch (e) {
+      return FirebaseService.mensagemErro(e);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -250,7 +296,14 @@ class AppState extends ChangeNotifier {
       ..telefone = telefone.trim()
       ..cidade = cidade.trim()
       ..endereco = endereco.trim();
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.atualizar(Colecoes.doadores, d.id, {
+      'nome': d.nome,
+      'peso': d.peso,
+      'telefone': d.telefone,
+      'cidade': d.cidade,
+      'endereco': d.endereco,
+    }));
   }
 
   void definirNotificacoes(bool ativo) {
@@ -258,7 +311,8 @@ class AppState extends ChangeNotifier {
     if (d == null) return;
     d.notificacoes = ativo;
     if (ativo) _push.pedirPermissao();
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.atualizar(Colecoes.doadores, d.id, {'notificacoes': ativo}));
   }
 
   /// LGPD art. 18, II: acesso aos dados.
@@ -286,16 +340,30 @@ class AppState extends ChangeNotifier {
     return const JsonEncoder.withIndent('  ').convert(dados);
   }
 
-  /// LGPD art. 18, VI: eliminação dos dados pessoais.
-  Future<void> excluirContaDoador() async {
+  /// LGPD art. 18, VI: eliminação dos dados pessoais (Firestore + login).
+  /// Retorna uma mensagem de erro ou null.
+  Future<String?> excluirContaDoador() async {
     final d = doadorAtual;
-    if (d == null) return;
-    _doadores.removeWhere((x) => x.id == d.id);
-    _doacoes.removeWhere((x) => x.doadorId == d.id);
-    _agendamentos.removeWhere((x) => x.doadorId == d.id);
-    _notificacoes.removeWhere((x) => x.doadorId == d.id);
-    await _storage.salvarBanco(_paraJson());
+    if (d == null) return null;
+    try {
+      await _fb.pararEscutas();
+      await _fb.excluirLote([
+        for (final x in _doacoes.where((x) => x.doadorId == d.id))
+          (Colecoes.doacoes, x.id),
+        for (final x in _agendamentos.where((x) => x.doadorId == d.id))
+          (Colecoes.agendamentos, x.id),
+        for (final x in _notificacoes.where((x) => x.doadorId == d.id))
+          (Colecoes.notificacoes, x.id),
+        (Colecoes.doadores, d.id),
+      ]);
+      await _fb.excluirUsuario();
+    } catch (e) {
+      final msg = FirebaseService.mensagemErro(e);
+      await sair();
+      return msg;
+    }
     await sair();
+    return null;
   }
 
   // ---------------------------------------------------------------------------
@@ -313,19 +381,22 @@ class AppState extends ChangeNotifier {
   void informarDoacao(DateTime data, String local) {
     final d = doadorAtual;
     if (d == null) return;
-    _doacoes.add(Doacao(
-      id: gerarId(),
+    final doacao = Doacao(
+      id: _fb.novoId(Colecoes.doacoes),
       doadorId: d.id,
       data: data,
       local: local.trim().isEmpty ? 'Local não informado' : local.trim(),
       informadaPeloDoador: true,
-    ));
-    _salvar();
+    );
+    _doacoes.add(doacao);
+    notifyListeners();
+    _gravar(_fb.salvar(Colecoes.doacoes, doacao.id, doacao.toJson()));
   }
 
   void removerDoacaoInformada(String id) {
     _doacoes.removeWhere((x) => x.id == id && x.informadaPeloDoador);
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.excluir(Colecoes.doacoes, id));
   }
 
   // ---------------------------------------------------------------------------
@@ -375,14 +446,16 @@ class AppState extends ChangeNotifier {
     if (ocupacao(instituicaoId, dataHora) >= capacidadePorHorario) {
       return 'Este horário acabou de lotar. Escolha outro.';
     }
-    _agendamentos.add(Agendamento(
-      id: gerarId(),
+    final ag = Agendamento(
+      id: _fb.novoId(Colecoes.agendamentos),
       doadorId: d.id,
       instituicaoId: instituicaoId,
       dataHora: dataHora,
       status: StatusAgendamento.agendado,
-    ));
-    _salvar();
+    );
+    _agendamentos.add(ag);
+    notifyListeners();
+    _gravar(_fb.salvar(Colecoes.agendamentos, ag.id, ag.toJson()));
     return null;
   }
 
@@ -393,17 +466,21 @@ class AppState extends ChangeNotifier {
     final a = primeiro(_agendamentos, (x) => x.id == agendamentoId);
     if (a == null) return;
     a.status = status;
+    _gravar(_fb.atualizar(
+        Colecoes.agendamentos, a.id, {'status': status.name}));
     if (status == StatusAgendamento.realizado) {
       final agora = DateTime.now();
-      _doacoes.add(Doacao(
-        id: gerarId(),
+      final doacao = Doacao(
+        id: _fb.novoId(Colecoes.doacoes),
         doadorId: a.doadorId,
         data: a.dataHora.isAfter(agora) ? agora : a.dataHora,
         local: instituicaoPorId(a.instituicaoId)?.nome ?? 'Instituição',
         instituicaoId: a.instituicaoId,
-      ));
+      );
+      _doacoes.add(doacao);
+      _gravar(_fb.salvar(Colecoes.doacoes, doacao.id, doacao.toJson()));
     }
-    _salvar();
+    notifyListeners();
   }
 
   // ---------------------------------------------------------------------------
@@ -414,7 +491,10 @@ class AppState extends ChangeNotifier {
     final i = instituicaoAtual;
     if (i == null) return;
     i.estoque[tipo] = nivel;
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.atualizar(Colecoes.instituicoes, i.id, {
+      'estoque': {for (final e in i.estoque.entries) e.key.name: e.value.name},
+    }));
   }
 
   Map<TipoSanguineo, int> doadoresPorTipo() => {
@@ -451,7 +531,7 @@ class AppState extends ChangeNotifier {
     if (inst == null || tipos.isEmpty) return 0;
     final alvo = doadoresParaTipos(tipos);
     final alerta = Alerta(
-      id: gerarId(),
+      id: _fb.novoId(Colecoes.alertas),
       instituicaoId: inst.id,
       tipo: tipo,
       titulo: titulo,
@@ -460,22 +540,25 @@ class AppState extends ChangeNotifier {
       criadoEm: DateTime.now(),
       notificados: alvo.length,
     );
-    _alertas.add(alerta);
-    for (final d in alvo) {
-      _notificacoes.add(Notificacao(
-        id: gerarId(),
-        doadorId: d.id,
-        alertaId: alerta.id,
-        titulo: titulo,
-        corpo: '${inst.nome}: $mensagem',
-        criadaEm: alerta.criadoEm,
-      ));
-    }
-    _salvar();
-    if (alvo.isNotEmpty) {
-      // Simula o push que chegaria no celular dos doadores compatíveis.
-      await _push.mostrar(titulo, '${inst.nome} · $mensagem');
-    }
+    final notificacoes = [
+      for (final d in alvo)
+        Notificacao(
+          id: _fb.novoId(Colecoes.notificacoes),
+          doadorId: d.id,
+          alertaId: alerta.id,
+          titulo: titulo,
+          corpo: '${inst.nome}: $mensagem',
+          criadaEm: alerta.criadoEm,
+        ),
+    ];
+    // Alerta + uma notificação por doador compatível, gravados juntos.
+    // Cada doador recebe a sua em tempo real pela escuta do Firestore.
+    await _fb.salvarLote([
+      (Colecoes.alertas, alerta.id, alerta.toJson()),
+      for (final n in notificacoes) (Colecoes.notificacoes, n.id, n.toJson()),
+    ]);
+    if (!_alertas.any((a) => a.id == alerta.id)) _alertas.add(alerta);
+    notifyListeners();
     return alvo.length;
   }
 
@@ -483,7 +566,8 @@ class AppState extends ChangeNotifier {
     final a = primeiro(_alertas, (x) => x.id == id);
     if (a == null) return;
     a.ativo = false;
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.atualizar(Colecoes.alertas, id, {'ativo': false}));
   }
 
   // ---------------------------------------------------------------------------
@@ -501,13 +585,27 @@ class AppState extends ChangeNotifier {
     final n = primeiro(_notificacoes, (x) => x.id == id);
     if (n == null || n.lida) return;
     n.lida = true;
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.atualizar(Colecoes.notificacoes, id, {'lida': true}));
   }
 
   void marcarTodasLidas(String doadorId) {
-    for (final n in _notificacoes.where((x) => x.doadorId == doadorId)) {
+    final naoLidas =
+        _notificacoes.where((x) => x.doadorId == doadorId && !x.lida).toList();
+    for (final n in naoLidas) {
       n.lida = true;
     }
-    _salvar();
+    notifyListeners();
+    _gravar(_fb.salvarLote([
+      for (final n in naoLidas) (Colecoes.notificacoes, n.id, n.toJson()),
+    ]));
+  }
+
+  @override
+  void dispose() {
+    _fb.pararEscutas();
+    _mensagens.close();
+    _novas.close();
+    super.dispose();
   }
 }
